@@ -1,4 +1,4 @@
-// dear imgui, v1.89.2 WIP
+// dear imgui, v1.89.2
 // (main code and documentation)
 
 // Help:
@@ -1027,7 +1027,7 @@ static void             UpdateKeyRoutingTable(ImGuiKeyRoutingTable* rt);
 static void             UpdateSettings();
 static bool             UpdateWindowManualResize(ImGuiWindow* window, const ImVec2& size_auto_fit, int* border_held, int resize_grip_count, ImU32 resize_grip_col[4], const ImRect& visibility_rect);
 static void             RenderWindowOuterBorders(ImGuiWindow* window);
-static void             RenderWindowDecorations(ImGuiWindow* window, const ImRect& title_bar_rect, bool title_bar_is_highlight, int resize_grip_count, const ImU32 resize_grip_col[4], float resize_grip_draw_size);
+static void             RenderWindowDecorations(ImGuiWindow* window, const ImRect& title_bar_rect, bool title_bar_is_highlight, bool handle_borders_and_resize_grips, int resize_grip_count, const ImU32 resize_grip_col[4], float resize_grip_draw_size);
 static void             RenderWindowTitleBarContents(ImGuiWindow* window, const ImRect& title_bar_rect, const char* name, bool* p_open);
 static void             RenderDimmedBackgroundBehindWindow(ImGuiWindow* window, ImU32 col);
 static void             RenderDimmedBackgrounds();
@@ -5148,6 +5148,12 @@ void ImGui::SetActiveIdUsingAllKeyboardKeys()
     NavMoveRequestCancel();
 }
 
+ImGuiID ImGui::GetItemID()
+{
+    ImGuiContext& g = *GImGui;
+    return g.LastItemData.ID;
+}
+
 ImVec2 ImGui::GetItemRectMin()
 {
     ImGuiContext& g = *GImGui;
@@ -5759,7 +5765,7 @@ static void ImGui::RenderWindowOuterBorders(ImGuiWindow* window)
 
 // Draw background and borders
 // Draw and handle scrollbars
-void ImGui::RenderWindowDecorations(ImGuiWindow* window, const ImRect& title_bar_rect, bool title_bar_is_highlight, int resize_grip_count, const ImU32 resize_grip_col[4], float resize_grip_draw_size)
+void ImGui::RenderWindowDecorations(ImGuiWindow* window, const ImRect& title_bar_rect, bool title_bar_is_highlight, bool handle_borders_and_resize_grips, int resize_grip_count, const ImU32 resize_grip_col[4], float resize_grip_draw_size)
 {
     ImGuiContext& g = *GImGui;
     ImGuiStyle& style = g.Style;
@@ -5824,7 +5830,7 @@ void ImGui::RenderWindowDecorations(ImGuiWindow* window, const ImRect& title_bar
             Scrollbar(ImGuiAxis_Y);
 
         // Render resize grips (after their input handling so we don't have a frame of latency)
-        if (!(flags & ImGuiWindowFlags_NoResize))
+        if (handle_borders_and_resize_grips && !(flags & ImGuiWindowFlags_NoResize))
         {
             for (int resize_grip_n = 0; resize_grip_n < resize_grip_count; resize_grip_n++)
             {
@@ -5838,7 +5844,8 @@ void ImGui::RenderWindowDecorations(ImGuiWindow* window, const ImRect& title_bar
         }
 
         // Borders
-        RenderWindowOuterBorders(window);
+        if (handle_borders_and_resize_grips)
+            RenderWindowOuterBorders(window);
     }
 }
 
@@ -6497,7 +6504,8 @@ bool ImGui::Begin(const char* name, bool* p_open, ImGuiWindowFlags flags)
             // Handle title bar, scrollbar, resize grips and resize borders
             const ImGuiWindow* window_to_highlight = g.NavWindowingTarget ? g.NavWindowingTarget : g.NavWindow;
             const bool title_bar_is_highlight = want_focus || (window_to_highlight && window->RootWindowForTitleBarHighlight == window_to_highlight->RootWindowForTitleBarHighlight);
-            RenderWindowDecorations(window, title_bar_rect, title_bar_is_highlight, resize_grip_count, resize_grip_col, resize_grip_draw_size);
+            const bool handle_borders_and_resize_grips = true; // This exists to facilitate merge with 'docking' branch.
+            RenderWindowDecorations(window, title_bar_rect, title_bar_is_highlight, handle_borders_and_resize_grips, resize_grip_count, resize_grip_col, resize_grip_draw_size);
 
             if (render_decorations_in_parent)
                 window->DrawList = &window->DrawListInst;
@@ -8767,8 +8775,6 @@ void ImGui::SetItemKeyOwner(ImGuiKey key, ImGuiInputFlags flags)
     }
 }
 
-// - Need to decide how to handle shortcut translations for Non-Mac <> Mac
-// - Ideas: https://github.com/ocornut/imgui/issues/456#issuecomment-264390864
 bool ImGui::Shortcut(ImGuiKeyChord key_chord, ImGuiID owner_id, ImGuiInputFlags flags)
 {
     ImGuiContext& g = *GImGui;
@@ -8790,7 +8796,7 @@ bool ImGui::Shortcut(ImGuiKeyChord key_chord, ImGuiID owner_id, ImGuiInputFlags 
     if (key == ImGuiKey_None)
         key = ConvertSingleModFlagToKey(mods);
 
-    if (!IsKeyPressed(key, owner_id, (flags & (ImGuiInputFlags_Repeat | ImGuiInputFlags_RepeatRateMask_))))
+    if (!IsKeyPressed(key, owner_id, (flags & (ImGuiInputFlags_Repeat | (ImGuiInputFlags)ImGuiInputFlags_RepeatRateMask_))))
         return false;
     IM_ASSERT((flags & ~ImGuiInputFlags_SupportedByShortcut) == 0); // Passing flags not supported by this function!
 
@@ -9660,7 +9666,7 @@ ImVec2 ImGui::ScrollToRectEx(ImGuiWindow* window, const ImRect& item_rect, ImGui
     else if (((flags & ImGuiScrollFlags_KeepVisibleCenterX) && !fully_visible_x) || (flags & ImGuiScrollFlags_AlwaysCenterX))
     {
         if (can_be_fully_visible_x)
-            SetScrollFromPosX(window, ImFloor((item_rect.Min.x + item_rect.Max.y) * 0.5f) - window->Pos.x, 0.5f);
+            SetScrollFromPosX(window, ImFloor((item_rect.Min.x + item_rect.Max.x) * 0.5f) - window->Pos.x, 0.5f);
         else
             SetScrollFromPosX(window, item_rect.Min.x - window->Pos.x, 0.0f);
     }
@@ -11176,7 +11182,7 @@ void ImGui::NavUpdateCreateMoveRequest()
         g.NavMoveScrollFlags = ImGuiScrollFlags_None;
         if (window && !g.NavWindowingTarget && !(window->Flags & ImGuiWindowFlags_NoNavInputs))
         {
-            const ImGuiInputFlags repeat_mode = ImGuiInputFlags_Repeat | ImGuiInputFlags_RepeatRateNavMove;
+            const ImGuiInputFlags repeat_mode = ImGuiInputFlags_Repeat | (ImGuiInputFlags)ImGuiInputFlags_RepeatRateNavMove;
             if (!IsActiveIdUsingNavDir(ImGuiDir_Left)  && ((nav_gamepad_active && IsKeyPressed(ImGuiKey_GamepadDpadLeft,  ImGuiKeyOwner_None, repeat_mode)) || (nav_keyboard_active && IsKeyPressed(ImGuiKey_LeftArrow,  ImGuiKeyOwner_None, repeat_mode)))) { g.NavMoveDir = ImGuiDir_Left; }
             if (!IsActiveIdUsingNavDir(ImGuiDir_Right) && ((nav_gamepad_active && IsKeyPressed(ImGuiKey_GamepadDpadRight, ImGuiKeyOwner_None, repeat_mode)) || (nav_keyboard_active && IsKeyPressed(ImGuiKey_RightArrow, ImGuiKeyOwner_None, repeat_mode)))) { g.NavMoveDir = ImGuiDir_Right; }
             if (!IsActiveIdUsingNavDir(ImGuiDir_Up)    && ((nav_gamepad_active && IsKeyPressed(ImGuiKey_GamepadDpadUp,    ImGuiKeyOwner_None, repeat_mode)) || (nav_keyboard_active && IsKeyPressed(ImGuiKey_UpArrow,    ImGuiKeyOwner_None, repeat_mode)))) { g.NavMoveDir = ImGuiDir_Up; }
